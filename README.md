@@ -1,5 +1,7 @@
 # Tab FX Rack
 
+![Tab FX Rack の操作画面](docs/screenshot.png)
+
 YouTube / SoundCloud の再生音声に、ブラウザ内でリアルタイムにエフェクトをかける Chrome / Chromium 向け拡張機能です。外部ライブラリやビルド作業は必要ありません。
 
 ## 主な機能

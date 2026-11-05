@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Tab FX Rack</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand"><div class="brand-mark"><i></i><i></i><i></i></div><div><strong>TAB FX RACK</strong><span>YOUTUBE / SOUNDCLOUD</span></div></div>
+      <div class="target"><span id="siteBadge" class="site-badge">NO TAB</span><span id="tabTitle" class="tab-title">Open YouTube or SoundCloud</span></div>
+      <button id="masterButton" class="master-button" type="button"><i></i><span id="masterLabel">START</span></button>
+    </header>
+
+    <section class="monitor">
+      <div class="meter-panel"><div class="meter-title">IN</div><canvas id="inputMeter" width="52" height="105"></canvas></div>
+      <div class="spectrum-panel">
+        <div class="monitor-head"><span>REAL-TIME SPECTRUM</span><div><button id="spectrumMode" class="mini-button active" type="button">OUT</button><button id="holdButton" class="mini-button" type="button">HOLD</button></div></div>
+        <canvas id="spectrumCanvas" width="660" height="105"></canvas>
+      </div>
+      <div class="meter-panel"><div class="meter-title">OUT</div><canvas id="outputMeter" width="52" height="105"></canvas></div>
+    </section>
+
+    <section class="chain-label"><span>IN</span><i></i><span>EQ</span><i></i><span>DISTORTION</span><i></i><span>CLIPPER</span><i></i><span>REVERB</span><i></i><span>COMP</span><i></i><span>OUT</span></section>
+
+    <section class="rack">
+      <article class="device eq-device" data-effect-card="eq">
+        <header class="device-header"><button class="device-power" data-effect="eq" type="button"></button><span>EQ</span><em>01</em></header>
+        <canvas id="eqCanvas" class="device-canvas" width="180" height="96"></canvas>
+        <div class="param-grid eq-grid">
+          <div class="knob" data-param="eq.lowFreq" data-min="40" data-max="500" data-step="1" data-default="120" data-scale="log" data-format="hz"><div class="knob-face"><i></i></div><b></b><span>LOW FREQ</span></div>
+          <div class="knob" data-param="eq.lowGain" data-min="-15" data-max="15" data-step="0.1" data-default="0" data-format="db"><div class="knob-face"><i></i></div><b></b><span>LOW GAIN</span></div>
+          <div class="knob" data-param="eq.midFreq" data-min="150" data-max="8000" data-step="1" data-default="1000" data-scale="log" data-format="hz"><div class="knob-face"><i></i></div><b></b><span>MID FREQ</span></div>
+          <div class="knob" data-param="eq.midGain" data-min="-15" data-max="15" data-step="0.1" data-default="0" data-format="db"><div class="knob-face"><i></i></div><b></b><span>MID GAIN</span></div>
+          <div class="knob" data-param="eq.midQ" data-min="0.2" data-max="8" data-step="0.01" data-default="0.8" data-scale="log" data-format="q"><div class="knob-face"><i></i></div><b></b><span>MID Q</span></div>
+          <div class="knob" data-param="eq.highFreq" data-min="2000" data-max="16000" data-step="10" data-default="8000" data-scale="log" data-format="hz"><div class="knob-face"><i></i></div><b></b><span>HIGH FREQ</span></div>
+          <div class="knob" data-param="eq.highGain" data-min="-15" data-max="15" data-step="0.1" data-default="0" data-format="db"><div class="knob-face"><i></i></div><b></b><span>HIGH GAIN</span></div>
+        </div>
+      </article>
+
+      <article class="device" data-effect-card="distortion">
+        <header class="device-header"><button class="device-power" data-effect="distortion" type="button"></button><span>DISTORTION</span><em>02</em></header>
+        <canvas id="distortionCanvas" class="device-canvas" width="136" height="96"></canvas>
+        <div class="param-grid two-col">
+          <div class="knob" data-param="distortion.drive" data-min="0" data-max="30" data-step="0.1" data-default="6" data-format="db"><div class="knob-face"><i></i></div><b></b><span>DRIVE</span></div>
+          <div class="knob" data-param="distortion.tone" data-min="800" data-max="20000" data-step="10" data-default="12000" data-scale="log" data-format="hz"><div class="knob-face"><i></i></div><b></b><span>TONE</span></div>
+          <div class="knob" data-param="distortion.mix" data-min="0" data-max="1" data-step="0.01" data-default="0.35" data-format="pct"><div class="knob-face"><i></i></div><b></b><span>MIX</span></div>
+          <div class="knob" data-param="distortion.output" data-min="-18" data-max="6" data-step="0.1" data-default="0" data-format="db"><div class="knob-face"><i></i></div><b></b><span>OUTPUT</span></div>
+        </div>
+      </article>
+
+      <article class="device" data-effect-card="clipper">
+        <header class="device-header"><button class="device-power" data-effect="clipper" type="button"></button><span>CLIPPER</span><em>03</em></header>
+        <canvas id="clipperCanvas" class="device-canvas" width="124" height="96"></canvas>
+        <div class="param-grid clip-grid">
+          <div class="knob" data-param="clipper.drive" data-min="0" data-max="24" data-step="0.1" data-default="0" data-format="db"><div class="knob-face"><i></i></div><b></b><span>DRIVE</span></div>
+          <div class="knob" data-param="clipper.softness" data-min="0" data-max="1" data-step="0.01" data-default="0.15" data-format="pct"><div class="knob-face"><i></i></div><b></b><span>SOFT</span></div>
+          <div class="knob" data-param="clipper.ceiling" data-min="-12" data-max="0" data-step="0.1" data-default="-0.3" data-format="db"><div class="knob-face"><i></i></div><b></b><span>CEILING</span></div>
+        </div>
+      </article>
+
+      <article class="device" data-effect-card="reverb">
+        <header class="device-header"><button class="device-power" data-effect="reverb" type="button"></button><span>REVERB</span><em>04</em></header>
+        <canvas id="reverbCanvas" class="device-canvas" width="137" height="96"></canvas>
+        <div class="param-grid two-col reverb-grid">
+          <div class="knob" data-param="reverb.size" data-min="0" data-max="1" data-step="0.01" data-default="0.55" data-format="pct"><div class="knob-face"><i></i></div><b></b><span>SIZE</span></div>
+          <div class="knob" data-param="reverb.decay" data-min="0.2" data-max="8" data-step="0.05" data-default="2" data-scale="log" data-format="sec"><div class="knob-face"><i></i></div><b></b><span>DECAY</span></div>
+          <div class="knob" data-param="reverb.preDelay" data-min="0" data-max="0.12" data-step="0.001" data-default="0.02" data-format="ms"><div class="knob-face"><i></i></div><b></b><span>PRE-DELAY</span></div>
+          <div class="knob" data-param="reverb.damping" data-min="1000" data-max="20000" data-step="10" data-default="10000" data-scale="log" data-format="hz"><div class="knob-face"><i></i></div><b></b><span>DAMPING</span></div>
+          <div class="knob wide-knob" data-param="reverb.mix" data-min="0" data-max="1" data-step="0.01" data-default="0.18" data-format="pct"><div class="knob-face"><i></i></div><b></b><span>MIX</span></div>
+        </div>
+      </article>
+
+      <article class="device comp-device" data-effect-card="compressor">
+        <header class="device-header"><button class="device-power" data-effect="compressor" type="button"></button><span>COMP</span><em>05</em></header>
+        <div class="comp-visual"><canvas id="compCanvas" width="145" height="96"></canvas><div class="gr-meter"><span>GR</span><i id="grFill"></i><b id="grValue">0.0</b></div></div>
+        <div class="param-grid comp-grid">
+          <div class="knob" data-param="compressor.threshold" data-min="-60" data-max="0" data-step="0.5" data-default="-18" data-format="db"><div class="knob-face"><i></i></div><b></b><span>THRESH</span></div>
+          <div class="knob" data-param="compressor.ratio" data-min="1" data-max="20" data-step="0.1" data-default="4" data-format="ratio"><div class="knob-face"><i></i></div><b></b><span>RATIO</span></div>
+          <div class="knob" data-param="compressor.attack" data-min="0.0001" data-max="0.1" data-step="0.0001" data-default="0.01" data-scale="log" data-format="ms"><div class="knob-face"><i></i></div><b></b><span>ATTACK</span></div>
+          <div class="knob" data-param="compressor.release" data-min="0.02" data-max="1" data-step="0.001" data-default="0.18" data-scale="log" data-format="ms"><div class="knob-face"><i></i></div><b></b><span>RELEASE</span></div>
+          <div class="knob" data-param="compressor.knee" data-min="0" data-max="40" data-step="0.5" data-default="6" data-format="dbplain"><div class="knob-face"><i></i></div><b></b><span>KNEE</span></div>
+          <div class="knob" data-param="compressor.makeup" data-min="-12" data-max="12" data-step="0.1" data-default="0" data-format="db"><div class="knob-face"><i></i></div><b></b><span>MAKEUP</span></div>
+        </div>
+      </article>
+    </section>
+
+    <footer class="footer"><span id="statusText"><i></i>READY</span><span>DRAG · WHEEL FINE · DOUBLE CLICK RESET</span></footer>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

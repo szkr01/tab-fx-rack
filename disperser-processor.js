@@ -1,13 +1,14 @@
 // Real-time port of the recovered Disperser SVF cascade (disperser-analysis/reference.py).
 class DisperserProcessor extends AudioWorkletProcessor {
-  constructor() {
+  constructor(options) {
     super();
-    this.enabled = false;
-    this.amount = 16;
-    this.frequency = 130;
-    this.pinch = 0;
-    this.currentFrequency = 130;
-    this.currentPinch = 0;
+    const initial = options.processorOptions || {};
+    this.enabled = initial.enabled ?? false;
+    this.amount = initial.amount ?? 16;
+    this.frequency = initial.frequency ?? 130;
+    this.pinch = initial.pinch ?? 0;
+    this.currentFrequency = this.frequency;
+    this.currentPinch = this.pinch;
     this.previousAmount = null;
     this.stages = Array.from({ length: 32 }, () => new Float64Array(4));
     this.scratch = [new Float32Array(64), new Float32Array(64)];

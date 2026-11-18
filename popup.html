@@ -23,7 +23,7 @@
       <div class="meter-panel"><div class="meter-title">OUT</div><canvas id="outputMeter" width="52" height="105"></canvas></div>
     </section>
 
-    <section class="chain-label"><span>IN</span><i></i><span>EQ</span><i></i><span>DISTORTION</span><i></i><span>CLIPPER</span><i></i><span>REVERB</span><i></i><span>COMP</span><i></i><span>OUT</span></section>
+    <section class="chain-label" aria-label="Audio effect order"></section>
 
     <section class="rack">
       <article class="device eq-device" data-effect-card="eq">
@@ -40,7 +40,7 @@
         </div>
       </article>
 
-      <article class="device" data-effect-card="distortion">
+      <article class="device distortion-device" data-effect-card="distortion">
         <header class="device-header"><button class="device-power" data-effect="distortion" type="button"></button><span>DISTORTION</span><em>02</em></header>
         <canvas id="distortionCanvas" class="device-canvas" width="136" height="96"></canvas>
         <div class="param-grid two-col">
@@ -51,7 +51,7 @@
         </div>
       </article>
 
-      <article class="device" data-effect-card="clipper">
+      <article class="device clipper-device" data-effect-card="clipper">
         <header class="device-header"><button class="device-power" data-effect="clipper" type="button"></button><span>CLIPPER</span><em>03</em></header>
         <canvas id="clipperCanvas" class="device-canvas" width="124" height="96"></canvas>
         <div class="param-grid clip-grid">
@@ -61,7 +61,7 @@
         </div>
       </article>
 
-      <article class="device" data-effect-card="reverb">
+      <article class="device reverb-device" data-effect-card="reverb">
         <header class="device-header"><button class="device-power" data-effect="reverb" type="button"></button><span>REVERB</span><em>04</em></header>
         <canvas id="reverbCanvas" class="device-canvas" width="137" height="96"></canvas>
         <div class="param-grid two-col reverb-grid">
@@ -85,9 +85,19 @@
           <div class="knob" data-param="compressor.makeup" data-min="-12" data-max="12" data-step="0.1" data-default="0" data-format="db"><div class="knob-face"><i></i></div><b></b><span>MAKEUP</span></div>
         </div>
       </article>
+
+      <article class="device disperser-device" data-effect-card="disperser">
+        <header class="device-header"><button class="device-power" data-effect="disperser" type="button"></button><span>DISPERSER</span><em>06</em></header>
+        <canvas id="disperserCanvas" class="device-canvas" width="145" height="96"></canvas>
+        <div class="param-grid disperser-grid">
+          <div class="knob" data-param="disperser.amount" data-min="0" data-max="32" data-step="1" data-default="16" data-format="stages"><div class="knob-face"><i></i></div><b></b><span>AMOUNT</span></div>
+          <div class="knob" data-param="disperser.frequency" data-min="20" data-max="20000" data-step="1" data-default="130" data-scale="log" data-format="hz"><div class="knob-face"><i></i></div><b></b><span>FREQ</span></div>
+          <div class="knob" data-param="disperser.pinch" data-min="0" data-max="1" data-step="0.01" data-default="0" data-format="pct"><div class="knob-face"><i></i></div><b></b><span>PINCH</span></div>
+        </div>
+      </article>
     </section>
 
-    <footer class="footer"><span id="statusText"><i></i>READY</span><span>DRAG · WHEEL FINE · DOUBLE CLICK RESET</span></footer>
+    <footer class="footer"><span id="statusText"><i></i>READY</span><span>DRAG HEADER TO REORDER · WHEEL / DOUBLE CLICK RESET</span></footer>
   </main>
   <script src="popup.js"></script>
 </body>

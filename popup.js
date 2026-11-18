@@ -1,9 +1,12 @@
+const EFFECT_ORDER = ['eq', 'distortion', 'clipper', 'reverb', 'compressor', 'disperser'];
 const DEFAULT_STATE = {
+  order: EFFECT_ORDER,
   eq: { enabled: true, lowFreq: 120, lowGain: 0, midFreq: 1000, midGain: 0, midQ: 0.8, highFreq: 8000, highGain: 0 },
   distortion: { enabled: false, drive: 6, tone: 12000, mix: 0.35, output: 0 },
   clipper: { enabled: false, drive: 0, softness: 0.15, ceiling: -0.3 },
   reverb: { enabled: false, size: 0.55, decay: 2.0, preDelay: 0.02, damping: 10000, mix: 0.18 },
-  compressor: { enabled: false, threshold: -18, ratio: 4, attack: 0.01, release: 0.18, knee: 6, makeup: 0 }
+  compressor: { enabled: false, threshold: -18, ratio: 4, attack: 0.01, release: 0.18, knee: 6, makeup: 0 },
+  disperser: { enabled: false, amount: 16, frequency: 130, pinch: 0 }
 };
 
 let state = structuredClone(DEFAULT_STATE);
@@ -33,17 +36,20 @@ const distortionCanvas = $('distortionCanvas');
 const clipperCanvas = $('clipperCanvas');
 const reverbCanvas = $('reverbCanvas');
 const compCanvas = $('compCanvas');
+const disperserCanvas = $('disperserCanvas');
 const grFill = $('grFill');
 const grValue = $('grValue');
 
 function mergeState(next) {
   if (!next) return structuredClone(DEFAULT_STATE);
   return {
+    order: Array.isArray(next.order) && next.order.length === EFFECT_ORDER.length && EFFECT_ORDER.every(effect => next.order.includes(effect)) ? [...next.order] : [...EFFECT_ORDER],
     eq: { ...DEFAULT_STATE.eq, ...(next.eq || {}) },
     distortion: { ...DEFAULT_STATE.distortion, ...(next.distortion || {}) },
     clipper: { ...DEFAULT_STATE.clipper, ...(next.clipper || {}) },
     reverb: { ...DEFAULT_STATE.reverb, ...(next.reverb || {}) },
-    compressor: { ...DEFAULT_STATE.compressor, ...(next.compressor || {}) }
+    compressor: { ...DEFAULT_STATE.compressor, ...(next.compressor || {}) },
+    disperser: { ...DEFAULT_STATE.disperser, ...(next.disperser || {}) }
   };
 }
 
@@ -72,6 +78,7 @@ function formatValue(value, format) {
   if (format === 'ratio') return `${value.toFixed(1)}:1`;
   if (format === 'ms') return `${value * 1000 < 10 ? (value * 1000).toFixed(1) : Math.round(value * 1000)} ms`;
   if (format === 'q') return `Q ${value.toFixed(2)}`;
+  if (format === 'stages') return `${value} STG`;
   return String(value);
 }
 
@@ -191,6 +198,96 @@ function bindPower() {
     renderEffects();
     persistState();
   }));
+}
+
+function renderOrder() {
+  const rack = document.querySelector('.rack');
+  const chain = document.querySelector('.chain-label');
+  const names = { eq: 'EQ', distortion: 'DISTORTION', clipper: 'CLIPPER', reverb: 'REVERB', compressor: 'COMP', disperser: 'DISPERSER' };
+  for (const [index, effect] of state.order.entries()) {
+    const card = rack.querySelector(`[data-effect-card="${effect}"]`);
+    rack.appendChild(card);
+    card.querySelector('.device-header em').textContent = String(index + 1).padStart(2, '0');
+    const [left, right] = card.querySelectorAll('.order-button');
+    left.disabled = index === 0;
+    right.disabled = index === state.order.length - 1;
+  }
+  chain.replaceChildren();
+  for (const [index, name] of ['IN', ...state.order.map(effect => names[effect]), 'OUT'].entries()) {
+    if (index) chain.appendChild(document.createElement('i'));
+    const label = document.createElement('span');
+    label.textContent = name;
+    if (index > 0 && index <= state.order.length) {
+      label.className = 'chain-effect';
+      label.title = 'Show ' + name;
+      label.addEventListener('click', () => rack.querySelector(`[data-effect-card="${state.order[index - 1]}"]`).scrollIntoView({ block: 'nearest', inline: 'nearest' }));
+    }
+    chain.appendChild(label);
+  }
+}
+
+function moveEffect(effect, direction) {
+  const index = state.order.indexOf(effect);
+  const next = index + direction;
+  if (next < 0 || next >= state.order.length) return;
+  state.order.splice(index, 1);
+  state.order.splice(next, 0, effect);
+  renderOrder();
+  document.querySelector(`[data-effect-card="${effect}"]`).scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  persistState();
+}
+
+function bindOrder() {
+  const rack = document.querySelector('.rack');
+  let dragged = null;
+  for (const card of rack.querySelectorAll('.device')) {
+    const effect = card.dataset.effectCard;
+    const header = card.querySelector('.device-header');
+    const handle = header.querySelector('span');
+    handle.classList.add('drag-handle');
+    handle.draggable = true;
+    handle.title = 'Drag to reorder';
+    for (const [label, direction] of [['‹', -1], ['›', 1]]) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'order-button';
+      button.textContent = label;
+      button.title = direction < 0 ? 'Move effect left' : 'Move effect right';
+      button.addEventListener('click', () => moveEffect(effect, direction));
+      header.insertBefore(button, header.querySelector('em'));
+    }
+    handle.addEventListener('dragstart', event => {
+      dragged = effect;
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', effect);
+    });
+    handle.addEventListener('dragend', () => {
+      dragged = null;
+      rack.querySelectorAll('.drop-target').forEach(item => item.classList.remove('drop-target'));
+    });
+    card.addEventListener('dragover', event => {
+      if (!dragged || dragged === effect) return;
+      event.preventDefault();
+      card.classList.add('drop-target');
+    });
+    card.addEventListener('dragleave', () => card.classList.remove('drop-target'));
+    card.addEventListener('drop', event => {
+      event.preventDefault();
+      card.classList.remove('drop-target');
+      if (!dragged || dragged === effect) return;
+      const from = state.order.indexOf(dragged);
+      state.order.splice(from, 1);
+      const to = state.order.indexOf(effect) + (event.clientX > card.getBoundingClientRect().left + card.offsetWidth / 2 ? 1 : 0);
+      state.order.splice(to, 0, dragged);
+      renderOrder();
+      persistState();
+    });
+  }
+  rack.addEventListener('wheel', event => {
+    if (event.target.closest('.knob') || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+    event.preventDefault();
+    rack.scrollLeft += event.deltaY;
+  }, { passive: false });
 }
 
 function canvasSize(canvas) { return { ctx: canvas.getContext('2d'), w: canvas.width, h: canvas.height }; }
@@ -344,7 +441,38 @@ function drawComp() {
   const reduction = Math.min(0, viz?.reduction ?? 0); const amount = clamp(-reduction / 24, 0, 1); grFill.style.height = `${amount * 63}px`; grFill.style.top = `${14}px`; grValue.textContent = `${reduction.toFixed(1)}`;
 }
 
-function drawDeviceVisuals() { drawEq(); drawDistortion(); drawClipper(); drawReverb(); drawComp(); }
+function drawDisperser() {
+  const { ctx, w, h } = canvasSize(disperserCanvas); clearCanvas(ctx, w, h); drawGrid(ctx, w, h, 4, 4);
+  const fs = viz?.sampleRate || 48000;
+  const f0 = Math.min(state.disperser.frequency, fs * .49);
+  const q = .5 + 15.5 * state.disperser.pinch ** 4;
+  const omega0 = 2 * Math.PI * f0 / fs;
+  const alpha = Math.sin(omega0) / (2 * q);
+  const a1 = -2 * Math.cos(omega0) / (1 + alpha);
+  const a2 = (1 - alpha) / (1 + alpha);
+  const delay = [];
+  for (let i = 0; i < w; i++) {
+    const f = 20 * Math.pow(Math.min(20000, fs * .49) / 20, i / (w - 1));
+    const omega = 2 * Math.PI * f / fs;
+    const re = (1 + a2) * Math.cos(omega) + a1;
+    const im = (1 - a2) * Math.sin(omega);
+    const dre = -(1 + a2) * Math.sin(omega);
+    const dim = (1 - a2) * Math.cos(omega);
+    delay.push(Math.max(0, 2 * state.disperser.amount * (re * dim - im * dre) / (re * re + im * im) / fs * 1000));
+  }
+  const max = Math.max(1, ...delay);
+  ctx.beginPath();
+  delay.forEach((value, i) => {
+    const y = h - 8 - Math.log1p(value) / Math.log1p(max) * (h - 16);
+    if (!i) ctx.moveTo(i, y); else ctx.lineTo(i, y);
+  });
+  ctx.strokeStyle = '#63b8c8'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.fillStyle = '#777e80'; ctx.font = '7px Segoe UI';
+  ctx.fillText('GROUP DELAY', 4, 10);
+  ctx.fillText(`${max.toFixed(1)}ms`, w - 39, 10);
+}
+
+function drawDeviceVisuals() { drawEq(); drawDistortion(); drawClipper(); drawReverb(); drawComp(); drawDisperser(); }
 function drawAll() { drawSpectrum(); drawMeter(inputMeter, viz?.inputMeter); drawMeter(outputMeter, viz?.outputMeter); drawDeviceVisuals(); }
 
 async function pollVisualizer() {
@@ -397,14 +525,14 @@ async function toggleCapture() {
 }
 
 async function init() {
-  bindKnobs(); bindPower();
+  bindKnobs(); bindPower(); bindOrder();
   masterButton.addEventListener('click', toggleCapture);
   $('spectrumMode').addEventListener('click', () => { spectrumSource = spectrumSource === 'out' ? 'in' : 'out'; $('spectrumMode').textContent = spectrumSource.toUpperCase(); heldSpectrum = null; drawSpectrum(); });
   $('holdButton').addEventListener('click', () => { holdSpectrum = !holdSpectrum; $('holdButton').classList.toggle('active', holdSpectrum); if (!holdSpectrum) heldSpectrum = null; drawSpectrum(); });
   if (globalThis.chrome?.storage?.local) {
     const stored = await chrome.storage.local.get('fxState').catch(() => ({})); state = mergeState(stored.fxState);
   }
-  renderEffects(); await refreshTab(); startVisualizer();
+  renderOrder(); renderEffects(); await refreshTab(); startVisualizer();
 }
 
 init().catch(error => renderStatus(error.message || 'INITIALIZATION ERROR', true));

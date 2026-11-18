@@ -1,20 +1,11 @@
-const EFFECT_ORDER = ['eq', 'distortion', 'clipper', 'reverb', 'compressor', 'disperser'];
-const DEFAULT_STATE = {
-  order: EFFECT_ORDER,
-  eq: { enabled: true, lowFreq: 120, lowGain: 0, midFreq: 1000, midGain: 0, midQ: 0.8, highFreq: 8000, highGain: 0 },
-  distortion: { enabled: false, drive: 6, tone: 12000, mix: 0.35, output: 0 },
-  clipper: { enabled: false, drive: 0, softness: 0.15, ceiling: -0.3 },
-  reverb: { enabled: false, size: 0.55, decay: 2.0, preDelay: 0.02, damping: 10000, mix: 0.18 },
-  compressor: { enabled: false, threshold: -18, ratio: 4, attack: 0.01, release: 0.18, knee: 6, makeup: 0 },
-  disperser: { enabled: false, amount: 16, frequency: 130, pinch: 0 }
-};
-
-let state = structuredClone(DEFAULT_STATE);
+let state = normalizeRack(null);
+let presets = [];
 let activeTab = null;
 let runningTabId = null;
 let supported = false;
 let saveTimer = null;
 let drag = null;
+let draggedId = null;
 let viz = null;
 let vizTimer = null;
 let holdSpectrum = false;
@@ -31,30 +22,16 @@ const footer = document.querySelector('.footer');
 const spectrumCanvas = $('spectrumCanvas');
 const inputMeter = $('inputMeter');
 const outputMeter = $('outputMeter');
-const eqCanvas = $('eqCanvas');
-const distortionCanvas = $('distortionCanvas');
-const clipperCanvas = $('clipperCanvas');
-const reverbCanvas = $('reverbCanvas');
-const compCanvas = $('compCanvas');
-const disperserCanvas = $('disperserCanvas');
-const grFill = $('grFill');
-const grValue = $('grValue');
+const rack = document.querySelector('.rack');
+const templates = new Map([...rack.querySelectorAll('.device')].map(card => [card.dataset.effectCard, card.cloneNode(true)]));
 
-function mergeState(next) {
-  if (!next) return structuredClone(DEFAULT_STATE);
-  return {
-    order: Array.isArray(next.order) && next.order.length === EFFECT_ORDER.length && EFFECT_ORDER.every(effect => next.order.includes(effect)) ? [...next.order] : [...EFFECT_ORDER],
-    eq: { ...DEFAULT_STATE.eq, ...(next.eq || {}) },
-    distortion: { ...DEFAULT_STATE.distortion, ...(next.distortion || {}) },
-    clipper: { ...DEFAULT_STATE.clipper, ...(next.clipper || {}) },
-    reverb: { ...DEFAULT_STATE.reverb, ...(next.reverb || {}) },
-    compressor: { ...DEFAULT_STATE.compressor, ...(next.compressor || {}) },
-    disperser: { ...DEFAULT_STATE.disperser, ...(next.disperser || {}) }
-  };
+function effectFor(knob) {
+  const id = knob.closest('.device').dataset.instanceId;
+  return state.chain.find(effect => effect.id === id);
 }
 
-function getPath(path) { const [group, key] = path.split('.'); return state[group][key]; }
-function setPath(path, value) { const [group, key] = path.split('.'); state[group][key] = value; }
+function getPath(knob) { return effectFor(knob)[knob.dataset.param.split('.')[1]]; }
+function setPath(knob, value) { effectFor(knob)[knob.dataset.param.split('.')[1]] = value; }
 function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
 function dbToGain(db) { return Math.pow(10, db / 20); }
 function roundStep(value, step) { const decimals = Math.max(0, (String(step).split('.')[1] || '').length); return Number((Math.round(value / step) * step).toFixed(decimals)); }
@@ -99,7 +76,7 @@ function siteName(url) {
 }
 
 function renderKnob(knob) {
-  const value = getPath(knob.dataset.param);
+  const value = getPath(knob);
   const min = Number(knob.dataset.min);
   const max = Number(knob.dataset.max);
   const norm = clamp(valueToNorm(value, min, max, knob.dataset.scale), 0, 1);
@@ -112,16 +89,6 @@ function renderKnob(knob) {
   knob.setAttribute('aria-valuemin', String(min));
   knob.setAttribute('aria-valuemax', String(max));
   knob.setAttribute('aria-valuenow', String(value));
-}
-
-function renderEffects() {
-  document.querySelectorAll('.device-power').forEach(button => {
-    const enabled = state[button.dataset.effect].enabled;
-    button.classList.toggle('on', enabled);
-    button.closest('.device').classList.toggle('off', !enabled);
-  });
-  document.querySelectorAll('.knob').forEach(renderKnob);
-  drawDeviceVisuals();
 }
 
 function renderStatus(message = null, error = false) {
@@ -149,129 +116,156 @@ function updateKnobFromNormalizedDelta(knob, deltaNorm, currentNorm = null) {
   const min = Number(knob.dataset.min);
   const max = Number(knob.dataset.max);
   const step = Number(knob.dataset.step);
-  const current = getPath(knob.dataset.param);
+  const current = getPath(knob);
   const norm = clamp((currentNorm ?? valueToNorm(current, min, max, knob.dataset.scale)) + deltaNorm, 0, 1);
   const next = roundStep(clamp(normToValue(norm, min, max, knob.dataset.scale), min, max), step);
   if (next !== current) {
-    setPath(knob.dataset.param, next);
+    setPath(knob, next);
     renderKnob(knob);
-    drawDeviceVisuals();
+    drawDevice(knob.closest('.device'));
     persistState();
   }
   return norm;
 }
 
-function bindKnobs() {
-  document.querySelectorAll('.knob').forEach(knob => {
+function bindKnobs(card) {
+  card.querySelectorAll('.knob').forEach(knob => {
     knob.addEventListener('pointerdown', event => {
       event.preventDefault();
       knob.setPointerCapture(event.pointerId);
-      drag = { knob, pointerId: event.pointerId, lastY: event.clientY, norm: valueToNorm(getPath(knob.dataset.param), Number(knob.dataset.min), Number(knob.dataset.max), knob.dataset.scale) };
+      drag = { knob, pointerId: event.pointerId, lastY: event.clientY, norm: valueToNorm(getPath(knob), Number(knob.dataset.min), Number(knob.dataset.max), knob.dataset.scale) };
     });
     knob.addEventListener('pointermove', event => {
       if (!drag || drag.knob !== knob || drag.pointerId !== event.pointerId) return;
       const deltaY = drag.lastY - event.clientY;
       drag.lastY = event.clientY;
-      drag.norm = updateKnobFromNormalizedDelta(knob, deltaY * (event.shiftKey ? 0.0011 : 0.0042), drag.norm);
+      drag.norm = updateKnobFromNormalizedDelta(knob, deltaY * (event.shiftKey ? .0011 : .0042), drag.norm);
     });
-    knob.addEventListener('pointerup', event => { if (drag?.knob === knob && drag.pointerId === event.pointerId) drag = null; });
+    knob.addEventListener('pointerup', event => {
+      if (drag?.knob === knob && drag.pointerId === event.pointerId) drag = null;
+    });
     knob.addEventListener('wheel', event => {
       event.preventDefault();
-      const stepNorm = knob.dataset.format === 'stages' ? Number(knob.dataset.step) / (Number(knob.dataset.max) - Number(knob.dataset.min)) : 0.008;
+      const stepNorm = knob.dataset.format === 'stages' ? Number(knob.dataset.step) / (Number(knob.dataset.max) - Number(knob.dataset.min)) : .008;
       updateKnobFromNormalizedDelta(knob, event.deltaY < 0 ? stepNorm : -stepNorm);
     }, { passive: false });
     knob.addEventListener('dblclick', event => {
       event.preventDefault();
-      setPath(knob.dataset.param, Number(knob.dataset.default));
+      setPath(knob, Number(knob.dataset.default));
       renderKnob(knob);
-      drawDeviceVisuals();
+      drawDevice(card);
       persistState();
     });
     knob.addEventListener('keydown', event => {
-      if (!['ArrowUp','ArrowRight','ArrowDown','ArrowLeft'].includes(event.key)) return;
+      if (!['ArrowUp', 'ArrowRight', 'ArrowDown', 'ArrowLeft'].includes(event.key)) return;
       event.preventDefault();
-      const stepNorm = knob.dataset.format === 'stages' ? Number(knob.dataset.step) / (Number(knob.dataset.max) - Number(knob.dataset.min)) : 0.005;
-      updateKnobFromNormalizedDelta(knob, (event.key === 'ArrowUp' || event.key === 'ArrowRight') ? stepNorm : -stepNorm);
+      const stepNorm = knob.dataset.format === 'stages' ? Number(knob.dataset.step) / (Number(knob.dataset.max) - Number(knob.dataset.min)) : .005;
+      updateKnobFromNormalizedDelta(knob, ['ArrowUp', 'ArrowRight'].includes(event.key) ? stepNorm : -stepNorm);
     });
   });
 }
 
-function bindPower() {
-  document.querySelectorAll('.device-power').forEach(button => button.addEventListener('click', () => {
-    const effect = button.dataset.effect;
-    state[effect].enabled = !state[effect].enabled;
-    renderEffects();
-    persistState();
-  }));
+function renderEffects() {
+  for (const effect of state.chain) {
+    const card = [...rack.children].find(node => node.dataset.instanceId === effect.id);
+    const button = card.querySelector('.device-power');
+    button.classList.toggle('on', effect.enabled);
+    card.classList.toggle('off', !effect.enabled);
+    card.querySelectorAll('.knob').forEach(renderKnob);
+  }
+  drawDeviceVisuals();
 }
 
 function renderOrder() {
-  const rack = document.querySelector('.rack');
-  const chain = document.querySelector('.chain-label');
-  const names = { eq: 'EQ', distortion: 'DISTORTION', clipper: 'CLIPPER', reverb: 'REVERB', compressor: 'COMP', disperser: 'DISPERSER' };
-  for (const [index, effect] of state.order.entries()) {
-    const card = rack.querySelector(`[data-effect-card="${effect}"]`);
+  const label = document.querySelector('.chain-label');
+  label.replaceChildren();
+  const names = ['IN', ...state.chain.map(effect => EFFECT_NAMES[effect.type]), 'OUT'];
+  const counts = {};
+  for (const [index, name] of names.entries()) {
+    if (index) label.appendChild(document.createElement('i'));
+    const part = document.createElement('span');
+    part.textContent = name;
+    if (index > 0 && index <= state.chain.length) {
+      const effect = state.chain[index - 1];
+      counts[effect.type] = (counts[effect.type] || 0) + 1;
+      part.textContent += ' ' + counts[effect.type];
+      part.className = 'chain-effect';
+      part.title = 'Show ' + part.textContent;
+      part.addEventListener('click', () => {
+        const card = [...rack.children].find(node => node.dataset.instanceId === effect.id);
+        card.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      });
+    }
+    label.appendChild(part);
+  }
+  state.chain.forEach((effect, index) => {
+    const card = [...rack.children].find(node => node.dataset.instanceId === effect.id);
     rack.appendChild(card);
     card.querySelector('.device-header em').textContent = String(index + 1).padStart(2, '0');
     const [left, right] = card.querySelectorAll('.order-button');
     left.disabled = index === 0;
-    right.disabled = index === state.order.length - 1;
-  }
-  chain.replaceChildren();
-  for (const [index, name] of ['IN', ...state.order.map(effect => names[effect]), 'OUT'].entries()) {
-    if (index) chain.appendChild(document.createElement('i'));
-    const label = document.createElement('span');
-    label.textContent = name;
-    if (index > 0 && index <= state.order.length) {
-      label.className = 'chain-effect';
-      label.title = 'Show ' + name;
-      label.addEventListener('click', () => rack.querySelector(`[data-effect-card="${state.order[index - 1]}"]`).scrollIntoView({ block: 'nearest', inline: 'nearest' }));
-    }
-    chain.appendChild(label);
-  }
+    right.disabled = index === state.chain.length - 1;
+  });
 }
 
-function moveEffect(effect, direction) {
-  const index = state.order.indexOf(effect);
-  const next = index + direction;
-  if (next < 0 || next >= state.order.length) return;
-  state.order.splice(index, 1);
-  state.order.splice(next, 0, effect);
+function moveEffect(id, step) {
+  const from = state.chain.findIndex(effect => effect.id === id);
+  const to = from + step;
+  if (to < 0 || to >= state.chain.length) return;
+  const [effect] = state.chain.splice(from, 1);
+  state.chain.splice(to, 0, effect);
   renderOrder();
-  document.querySelector(`[data-effect-card="${effect}"]`).scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  [...rack.children].find(card => card.dataset.instanceId === id).scrollIntoView({ block: 'nearest', inline: 'nearest' });
   persistState();
 }
 
-function bindOrder() {
-  const rack = document.querySelector('.rack');
-  let dragged = null;
-  for (const card of rack.querySelectorAll('.device')) {
-    const effect = card.dataset.effectCard;
+function renderRack() {
+  rack.replaceChildren();
+  for (const effect of state.chain) {
+    const card = templates.get(effect.type).cloneNode(true);
+    card.dataset.instanceId = effect.id;
+    card.querySelectorAll('[id]').forEach(node => node.removeAttribute('id'));
+    card.querySelector('.device-power').addEventListener('click', () => {
+      effect.enabled = !effect.enabled;
+      renderEffects();
+      persistState();
+    });
     const header = card.querySelector('.device-header');
     const handle = header.querySelector('span');
     handle.classList.add('drag-handle');
     handle.draggable = true;
     handle.title = 'Drag to reorder';
-    for (const [label, direction] of [['‹', -1], ['›', 1]]) {
+    for (const [name, step] of [['‹', -1], ['›', 1]]) {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'order-button';
-      button.textContent = label;
-      button.title = direction < 0 ? 'Move effect left' : 'Move effect right';
-      button.addEventListener('click', () => moveEffect(effect, direction));
+      button.textContent = name;
+      button.title = step < 0 ? 'Move left' : 'Move right';
+      button.addEventListener('click', () => moveEffect(effect.id, step));
       header.insertBefore(button, header.querySelector('em'));
     }
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'device-remove';
+    remove.title = 'Remove effect';
+    remove.textContent = '×';
+    remove.addEventListener('click', () => {
+      state.chain = state.chain.filter(item => item.id !== effect.id);
+      renderRack();
+      persistState();
+    });
+    header.appendChild(remove);
     handle.addEventListener('dragstart', event => {
-      dragged = effect;
+      draggedId = effect.id;
       event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', effect);
+      event.dataTransfer.setData('text/plain', effect.id);
     });
     handle.addEventListener('dragend', () => {
-      dragged = null;
+      draggedId = null;
       rack.querySelectorAll('.drop-target').forEach(item => item.classList.remove('drop-target'));
     });
     card.addEventListener('dragover', event => {
-      if (!dragged || dragged === effect) return;
+      if (!draggedId || draggedId === effect.id) return;
       event.preventDefault();
       card.classList.add('drop-target');
     });
@@ -279,22 +273,138 @@ function bindOrder() {
     card.addEventListener('drop', event => {
       event.preventDefault();
       card.classList.remove('drop-target');
-      if (!dragged || dragged === effect) return;
-      const from = state.order.indexOf(dragged);
-      state.order.splice(from, 1);
-      const to = state.order.indexOf(effect) + (event.clientX > card.getBoundingClientRect().left + card.offsetWidth / 2 ? 1 : 0);
-      state.order.splice(to, 0, dragged);
+      if (!draggedId || draggedId === effect.id) return;
+      const from = state.chain.findIndex(item => item.id === draggedId);
+      const [moving] = state.chain.splice(from, 1);
+      const target = state.chain.findIndex(item => item.id === effect.id);
+      const after = event.clientX > card.getBoundingClientRect().left + card.offsetWidth / 2;
+      state.chain.splice(target + (after ? 1 : 0), 0, moving);
       renderOrder();
       persistState();
     });
+    bindKnobs(card);
+    rack.appendChild(card);
   }
+  renderOrder();
+  renderEffects();
+}
+
+function drawDevice(card) {
+  if (!card) return;
+  const effect = state.chain.find(item => item.id === card.dataset.instanceId);
+  const canvas = card.querySelector('.device-canvas, .comp-visual canvas');
+  const data = viz?.devices?.[effect.id];
+  if (effect.type === 'eq') drawEq(canvas, effect, data);
+  else if (effect.type === 'distortion') drawDistortion(canvas, effect);
+  else if (effect.type === 'clipper') drawClipper(canvas, effect, data);
+  else if (effect.type === 'reverb') drawReverb(canvas, effect);
+  else if (effect.type === 'compressor') drawComp(canvas, effect, data, card.querySelector('.gr-meter i'), card.querySelector('.gr-meter b'));
+  else drawDisperser(canvas, effect);
+}
+function drawDeviceVisuals() { for (const card of rack.children) drawDevice(card); }
+function drawAll() { drawSpectrum(); drawMeter(inputMeter, viz?.inputMeter); drawMeter(outputMeter, viz?.outputMeter); drawDeviceVisuals(); }
+
+function renderAddMenu() {
+  const menu = $('addFxMenu');
+  for (const type of EFFECT_TYPES) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = '+ ' + EFFECT_NAMES[type];
+    button.addEventListener('click', () => {
+      const effect = makeEffect(type);
+      state.chain.push(effect);
+      renderRack();
+      menu.hidden = true;
+      [...rack.children].at(-1).scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      persistState();
+    });
+    menu.appendChild(button);
+  }
+}
+
+async function storePresets() {
+  if (globalThis.chrome?.storage?.local) await chrome.storage.local.set({ fxPresets: presets });
+}
+
+function renderPresets() {
+  const list = $('presetList');
+  list.replaceChildren();
+  if (!presets.length) {
+    const empty = document.createElement('p');
+    empty.textContent = 'No presets saved.';
+    list.appendChild(empty);
+  }
+  for (const preset of presets) {
+    const row = document.createElement('div');
+    row.className = 'preset-row';
+    const name = document.createElement('input');
+    name.type = 'text';
+    name.maxLength = 80;
+    name.value = preset.name;
+    name.title = 'Edit preset name';
+    row.appendChild(name);
+    for (const [caption, action] of [
+      ['LOAD', () => {
+        state = normalizeRack(structuredClone(preset.rack));
+        renderRack();
+        persistState();
+        $('presetPanel').hidden = true;
+      }],
+      ['RENAME', async () => {
+        if (!name.value.trim()) return;
+        preset.name = name.value.trim();
+        await storePresets();
+        renderPresets();
+      }],
+      ['DELETE', async () => {
+        presets = presets.filter(item => item.id !== preset.id);
+        await storePresets();
+        renderPresets();
+      }]
+    ]) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = caption;
+      button.addEventListener('click', () => Promise.resolve(action()).catch(error => renderStatus(error.message, true)));
+      row.appendChild(button);
+    }
+    list.appendChild(row);
+  }
+}
+
+function bindRackControls() {
+  renderAddMenu();
+  $('addFxButton').addEventListener('click', () => {
+    $('addFxMenu').hidden = !$('addFxMenu').hidden;
+    $('presetPanel').hidden = true;
+  });
+  $('presetsButton').addEventListener('click', () => {
+    $('presetPanel').hidden = false;
+    $('addFxMenu').hidden = true;
+    renderPresets();
+  });
+  $('closePresets').addEventListener('click', () => { $('presetPanel').hidden = true; });
+  $('savePreset').addEventListener('click', async () => {
+    const name = $('presetName').value.trim() || 'Preset ' + (presets.length + 1);
+    presets.push({ id: crypto.randomUUID(), name, rack: structuredClone(state) });
+    try {
+      await storePresets();
+      $('presetName').value = '';
+      renderPresets();
+    } catch (error) { renderStatus(error.message, true); }
+  });
+  $('presetName').addEventListener('keydown', event => {
+    if (event.key === 'Enter') $('savePreset').click();
+  });
   rack.addEventListener('wheel', event => {
     if (event.target.closest('.knob') || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
     event.preventDefault();
     rack.scrollLeft += event.deltaY;
   }, { passive: false });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') { $('presetPanel').hidden = true; $('addFxMenu').hidden = true; }
+  });
 }
-
 function canvasSize(canvas) { return { ctx: canvas.getContext('2d'), w: canvas.width, h: canvas.height }; }
 function clearCanvas(ctx, w, h) { ctx.clearRect(0, 0, w, h); ctx.fillStyle = '#202425'; ctx.fillRect(0, 0, w, h); }
 function drawGrid(ctx, w, h, cols = 6, rows = 4) {
@@ -352,9 +462,9 @@ function drawMeter(canvas, meter) {
   }
 }
 
-function drawEq() {
-  const { ctx, w, h } = canvasSize(eqCanvas); clearCanvas(ctx, w, h); drawGrid(ctx, w, h, 6, 4); drawZero(ctx, w, h);
-  const spectrum = viz?.eqSpectrum;
+function drawEq(canvas, params, reading) {
+  const { ctx, w, h } = canvasSize(canvas); clearCanvas(ctx, w, h); drawGrid(ctx, w, h, 6, 4); drawZero(ctx, w, h);
+  const spectrum = reading?.eqSpectrum;
   if (spectrum) {
     ctx.beginPath();
     for (let i = 0; i < spectrum.length; i++) {
@@ -364,7 +474,7 @@ function drawEq() {
     }
     ctx.lineTo(w, h); ctx.closePath(); ctx.fillStyle = 'rgba(99,184,200,.07)'; ctx.fill();
   }
-  const response = viz?.eqResponse;
+  const response = reading?.eqResponse;
   if (response) {
     ctx.beginPath();
     for (let i = 0; i < response.length; i++) {
@@ -379,10 +489,10 @@ function drawEq() {
   ctx.fillStyle = '#6c7273'; ctx.font = '6px Segoe UI'; ctx.fillText('20',3,h-3); ctx.fillText('1k',w*.53,h-3); ctx.fillText('20k',w-18,h-3);
 }
 
-function drawDistortion() {
-  const { ctx, w, h } = canvasSize(distortionCanvas); clearCanvas(ctx, w, h); drawGrid(ctx, w, h, 4, 4); drawZero(ctx, w, h);
+function drawDistortion(canvas, params) {
+  const { ctx, w, h } = canvasSize(canvas); clearCanvas(ctx, w, h); drawGrid(ctx, w, h, 4, 4); drawZero(ctx, w, h);
   ctx.strokeStyle = 'rgba(255,255,255,.15)'; ctx.beginPath(); ctx.moveTo(w/2,0); ctx.lineTo(w/2,h); ctx.stroke();
-  const gain = dbToGain(state.distortion.drive); const amount = 2.15; const norm = Math.tanh(amount); const outGain = dbToGain(state.distortion.output);
+  const gain = dbToGain(params.drive); const amount = 2.15; const norm = Math.tanh(amount); const outGain = dbToGain(params.output);
   ctx.beginPath();
   for (let i = 0; i < w; i++) {
     const x = i / (w - 1) * 2 - 1;
@@ -395,18 +505,18 @@ function drawDistortion() {
   ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.beginPath(); ctx.moveTo(0,h); ctx.lineTo(w,0); ctx.stroke();
 }
 
-function drawClipper() {
-  const { ctx, w, h } = canvasSize(clipperCanvas); clearCanvas(ctx, w, h); drawGrid(ctx, w, h, 4, 4); drawZero(ctx, w, h);
-  const ceiling = dbToGain(state.clipper.ceiling); const yTop = h / 2 - ceiling * h * .42; const yBottom = h / 2 + ceiling * h * .42;
+function drawClipper(canvas, params, reading) {
+  const { ctx, w, h } = canvasSize(canvas); clearCanvas(ctx, w, h); drawGrid(ctx, w, h, 4, 4); drawZero(ctx, w, h);
+  const ceiling = dbToGain(params.ceiling); const yTop = h / 2 - ceiling * h * .42; const yBottom = h / 2 + ceiling * h * .42;
   ctx.setLineDash([3,3]); ctx.strokeStyle = 'rgba(212,154,69,.48)'; ctx.beginPath(); ctx.moveTo(0,yTop); ctx.lineTo(w,yTop); ctx.moveTo(0,yBottom); ctx.lineTo(w,yBottom); ctx.stroke(); ctx.setLineDash([]);
-  const pre = viz?.preClipWave; const post = viz?.postClipWave;
+  const pre = reading?.preClipWave; const post = reading?.postClipWave;
   if (pre) { ctx.beginPath(); pre.forEach((v,i) => { const x=i/(pre.length-1)*w; const y=h/2-v*h*.42; if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y); }); ctx.strokeStyle='rgba(210,214,214,.25)'; ctx.lineWidth=1; ctx.stroke(); }
   if (post) { ctx.beginPath(); post.forEach((v,i) => { const x=i/(post.length-1)*w; const y=h/2-v*h*.42; if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y); }); ctx.strokeStyle='#63b8c8'; ctx.lineWidth=1.4; ctx.stroke(); }
 }
 
-function drawReverb() {
-  const { ctx, w, h } = canvasSize(reverbCanvas); clearCanvas(ctx, w, h); drawGrid(ctx, w, h, 4, 4);
-  const room = state.reverb.size; const decay = state.reverb.decay; const pre = state.reverb.preDelay;
+function drawReverb(canvas, params) {
+  const { ctx, w, h } = canvasSize(canvas); clearCanvas(ctx, w, h); drawGrid(ctx, w, h, 4, 4);
+  const room = params.size; const decay = params.decay; const pre = params.preDelay;
   const preX = clamp(pre / .12, 0, 1) * w * .28;
   ctx.strokeStyle = 'rgba(212,154,69,.55)'; ctx.beginPath(); ctx.moveTo(preX, 5); ctx.lineTo(preX, h-5); ctx.stroke();
   ctx.beginPath();
@@ -426,8 +536,8 @@ function drawReverb() {
   ctx.strokeStyle = 'rgba(99,184,200,.34)'; ctx.stroke();
 }
 
-function compressorOutputDb(inputDb) {
-  const threshold = state.compressor.threshold; const ratio = state.compressor.ratio; const knee = state.compressor.knee;
+function compressorOutputDb(inputDb, params) {
+  const threshold = params.threshold; const ratio = params.ratio; const knee = params.knee;
   if (knee <= 0) return inputDb <= threshold ? inputDb : threshold + (inputDb - threshold) / ratio;
   const half = knee / 2;
   if (inputDb < threshold - half) return inputDb;
@@ -436,21 +546,21 @@ function compressorOutputDb(inputDb) {
   return inputDb + (1 / ratio - 1) * x * x / (2 * knee);
 }
 
-function drawComp() {
-  const { ctx, w, h } = canvasSize(compCanvas); clearCanvas(ctx, w, h); drawGrid(ctx, w, h, 4, 4);
+function drawComp(canvas, params, reading, grFill, grValue) {
+  const { ctx, w, h } = canvasSize(canvas); clearCanvas(ctx, w, h); drawGrid(ctx, w, h, 4, 4);
   ctx.strokeStyle='rgba(255,255,255,.16)';ctx.beginPath();ctx.moveTo(0,h);ctx.lineTo(w,0);ctx.stroke();
   ctx.beginPath();
-  for(let i=0;i<w;i++){const inDb=-60+i/(w-1)*60;const outDb=compressorOutputDb(inDb)+state.compressor.makeup;const y=h-clamp((outDb+60)/60,0,1)*h;if(i===0)ctx.moveTo(i,y);else ctx.lineTo(i,y)}
+  for(let i=0;i<w;i++){const inDb=-60+i/(w-1)*60;const outDb=compressorOutputDb(inDb, params)+params.makeup;const y=h-clamp((outDb+60)/60,0,1)*h;if(i===0)ctx.moveTo(i,y);else ctx.lineTo(i,y)}
   ctx.strokeStyle='#63b8c8';ctx.lineWidth=1.5;ctx.stroke();
-  const tx=(state.compressor.threshold+60)/60*w;ctx.strokeStyle='rgba(212,154,69,.45)';ctx.beginPath();ctx.moveTo(tx,0);ctx.lineTo(tx,h);ctx.stroke();
-  const reduction = Math.min(0, viz?.reduction ?? 0); const amount = clamp(-reduction / 24, 0, 1); grFill.style.height = `${amount * 63}px`; grFill.style.top = `${14}px`; grValue.textContent = `${reduction.toFixed(1)}`;
+  const tx=(params.threshold+60)/60*w;ctx.strokeStyle='rgba(212,154,69,.45)';ctx.beginPath();ctx.moveTo(tx,0);ctx.lineTo(tx,h);ctx.stroke();
+  const reduction = Math.min(0, reading?.reduction ?? 0); const amount = clamp(-reduction / 24, 0, 1); grFill.style.height = `${amount * 63}px`; grFill.style.top = `${14}px`; grValue.textContent = `${reduction.toFixed(1)}`;
 }
 
-function drawDisperser() {
-  const { ctx, w, h } = canvasSize(disperserCanvas); clearCanvas(ctx, w, h); drawGrid(ctx, w, h, 4, 4);
+function drawDisperser(canvas, params) {
+  const { ctx, w, h } = canvasSize(canvas); clearCanvas(ctx, w, h); drawGrid(ctx, w, h, 4, 4);
   const fs = viz?.sampleRate || 48000;
-  const f0 = Math.min(state.disperser.frequency, fs * .49);
-  const q = .5 + 15.5 * state.disperser.pinch ** 4;
+  const f0 = Math.min(params.frequency, fs * .49);
+  const q = .5 + 15.5 * params.pinch ** 4;
   const omega0 = 2 * Math.PI * f0 / fs;
   const alpha = Math.sin(omega0) / (2 * q);
   const a1 = -2 * Math.cos(omega0) / (1 + alpha);
@@ -463,7 +573,7 @@ function drawDisperser() {
     const im = (1 - a2) * Math.sin(omega);
     const dre = -(1 + a2) * Math.sin(omega);
     const dim = (1 - a2) * Math.cos(omega);
-    delay.push(Math.max(0, 2 * state.disperser.amount * (re * dim - im * dre) / (re * re + im * im) / fs * 1000));
+    delay.push(Math.max(0, 2 * params.amount * (re * dim - im * dre) / (re * re + im * im) / fs * 1000));
   }
   const max = Math.max(1, ...delay);
   ctx.beginPath();
@@ -476,9 +586,6 @@ function drawDisperser() {
   ctx.fillText('GROUP DELAY', 4, 10);
   ctx.fillText(`${max.toFixed(1)}ms`, w - 39, 10);
 }
-
-function drawDeviceVisuals() { drawEq(); drawDistortion(); drawClipper(); drawReverb(); drawComp(); drawDisperser(); }
-function drawAll() { drawSpectrum(); drawMeter(inputMeter, viz?.inputMeter); drawMeter(outputMeter, viz?.outputMeter); drawDeviceVisuals(); }
 
 async function pollVisualizer() {
   if (!globalThis.chrome?.runtime?.sendMessage || !activeTab || runningTabId !== activeTab.id) { viz = null; drawAll(); return; }
@@ -530,14 +637,28 @@ async function toggleCapture() {
 }
 
 async function init() {
-  bindKnobs(); bindPower(); bindOrder();
+  bindRackControls();
   masterButton.addEventListener('click', toggleCapture);
-  $('spectrumMode').addEventListener('click', () => { spectrumSource = spectrumSource === 'out' ? 'in' : 'out'; $('spectrumMode').textContent = spectrumSource.toUpperCase(); heldSpectrum = null; drawSpectrum(); });
-  $('holdButton').addEventListener('click', () => { holdSpectrum = !holdSpectrum; $('holdButton').classList.toggle('active', holdSpectrum); if (!holdSpectrum) heldSpectrum = null; drawSpectrum(); });
+  $('spectrumMode').addEventListener('click', () => {
+    spectrumSource = spectrumSource === 'out' ? 'in' : 'out';
+    $('spectrumMode').textContent = spectrumSource.toUpperCase();
+    heldSpectrum = null;
+    drawSpectrum();
+  });
+  $('holdButton').addEventListener('click', () => {
+    holdSpectrum = !holdSpectrum;
+    $('holdButton').classList.toggle('active', holdSpectrum);
+    if (!holdSpectrum) heldSpectrum = null;
+    drawSpectrum();
+  });
   if (globalThis.chrome?.storage?.local) {
-    const stored = await chrome.storage.local.get('fxState').catch(() => ({})); state = mergeState(stored.fxState);
+    const stored = await chrome.storage.local.get(['fxState', 'fxPresets']);
+    state = normalizeRack(stored.fxState);
+    presets = Array.isArray(stored.fxPresets) ? stored.fxPresets.filter(item => item && typeof item.name === 'string' && Array.isArray(item.rack?.chain)) : [];
   }
-  renderOrder(); renderEffects(); await refreshTab(); startVisualizer();
+  renderRack();
+  await refreshTab();
+  startVisualizer();
 }
 
 init().catch(error => renderStatus(error.message || 'INITIALIZATION ERROR', true));

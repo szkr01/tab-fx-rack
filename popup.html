@@ -23,7 +23,11 @@
       <div class="meter-panel"><div class="meter-title">OUT</div><canvas id="outputMeter" width="52" height="105"></canvas></div>
     </section>
 
-    <section class="chain-label" aria-label="Audio effect order"></section>
+    <section class="rack-top">
+      <div class="rack-controls"><button id="addFxButton" type="button">+ ADD FX</button><button id="presetsButton" type="button">PRESETS</button></div>
+      <div class="chain-label" aria-label="Audio effect order"></div>
+      <div id="addFxMenu" class="add-fx-menu" hidden></div>
+    </section>
 
     <section class="rack">
       <article class="device eq-device" data-effect-card="eq">
@@ -97,8 +101,14 @@
       </article>
     </section>
 
+    <section id="presetPanel" class="preset-panel" hidden>
+      <header><strong>PRESETS</strong><button id="closePresets" type="button">CLOSE</button></header>
+      <div class="preset-create"><input id="presetName" type="text" maxlength="80" placeholder="Preset name"><button id="savePreset" type="button">SAVE CURRENT RACK</button></div>
+      <div id="presetList" class="preset-list"></div>
+    </section>
     <footer class="footer"><span id="statusText"><i></i>READY</span><span>DRAG HEADER TO REORDER · WHEEL / DOUBLE CLICK RESET</span></footer>
   </main>
+  <script src="rack-state.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

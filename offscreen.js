@@ -1,36 +1,10 @@
-const EFFECT_ORDER = ['eq', 'distortion', 'clipper', 'reverb', 'compressor', 'disperser'];
-const DEFAULT_STATE = {
-  order: EFFECT_ORDER,
-  eq: { enabled: true, lowFreq: 120, lowGain: 0, midFreq: 1000, midGain: 0, midQ: 0.8, highFreq: 8000, highGain: 0 },
-  distortion: { enabled: false, drive: 6, tone: 12000, mix: 0.35, output: 0 },
-  clipper: { enabled: false, drive: 0, softness: 0.15, ceiling: -0.3 },
-  reverb: { enabled: false, size: 0.55, decay: 2.0, preDelay: 0.02, damping: 10000, mix: 0.18 },
-  compressor: { enabled: false, threshold: -18, ratio: 4, attack: 0.01, release: 0.18, knee: 6, makeup: 0 },
-  disperser: { enabled: false, amount: 16, frequency: 130, pinch: 0 }
-};
-
 let audioContext = null;
 let mediaStream = null;
 let sourceNode = null;
 let currentTabId = null;
 let nodes = null;
-let state = structuredClone(DEFAULT_STATE);
-let reverbTimer = null;
-let lastImpulseKey = '';
-let chainOrder = '';
-
-function mergeState(next) {
-  if (!next) return structuredClone(DEFAULT_STATE);
-  return {
-    order: Array.isArray(next.order) && next.order.length === EFFECT_ORDER.length && EFFECT_ORDER.every(effect => next.order.includes(effect)) ? [...next.order] : [...EFFECT_ORDER],
-    eq: { ...DEFAULT_STATE.eq, ...(next.eq || {}) },
-    distortion: { ...DEFAULT_STATE.distortion, ...(next.distortion || {}) },
-    clipper: { ...DEFAULT_STATE.clipper, ...(next.clipper || {}) },
-    reverb: { ...DEFAULT_STATE.reverb, ...(next.reverb || {}) },
-    compressor: { ...DEFAULT_STATE.compressor, ...(next.compressor || {}) },
-    disperser: { ...DEFAULT_STATE.disperser, ...(next.disperser || {}) }
-  };
-}
+let state = normalizeRack(null);
+let chainSignature = '';
 
 function dbToGain(db) {
   return Math.pow(10, db / 20);
@@ -117,64 +91,12 @@ function makeAnalyser(ctx, fftSize = 2048) {
 
 function createGraph() {
   const ctx = audioContext;
-
   const inputAnalyser = makeAnalyser(ctx, 4096);
   const inputSplitter = ctx.createChannelSplitter(2);
   const inputL = makeAnalyser(ctx, 512);
   const inputR = makeAnalyser(ctx, 512);
   const inputMeterSink = ctx.createGain();
   inputMeterSink.gain.value = 0;
-
-  const eqLow = ctx.createBiquadFilter();
-  const eqMid = ctx.createBiquadFilter();
-  const eqHigh = ctx.createBiquadFilter();
-  eqLow.type = 'lowshelf';
-  eqMid.type = 'peaking';
-  eqHigh.type = 'highshelf';
-  const eqAnalyser = makeAnalyser(ctx, 4096);
-
-  const distInput = ctx.createGain();
-  const distDry = ctx.createGain();
-  const distPre = ctx.createGain();
-  const distShape = ctx.createWaveShaper();
-  const distTone = ctx.createBiquadFilter();
-  const distWet = ctx.createGain();
-  const distSum = ctx.createGain();
-  const distOutput = ctx.createGain();
-  distShape.curve = makeDistortionCurve();
-  distShape.oversample = '4x';
-  distTone.type = 'lowpass';
-  distTone.Q.value = 0.55;
-
-  const clipPreAnalyser = makeAnalyser(ctx, 1024);
-  const clipDry = ctx.createGain();
-  const clipDrive = ctx.createGain();
-  const clipShape = ctx.createWaveShaper();
-  const clipPost = ctx.createGain();
-  const clipWet = ctx.createGain();
-  const clipSum = ctx.createGain();
-  const clipPostAnalyser = makeAnalyser(ctx, 1024);
-  clipShape.curve = makeClipCurve(DEFAULT_STATE.clipper.softness);
-  clipShape.oversample = '4x';
-
-  const reverbInput = ctx.createGain();
-  const reverbDry = ctx.createGain();
-  const reverbPreDelay = ctx.createDelay(0.2);
-  const convolver = ctx.createConvolver();
-  const reverbDamping = ctx.createBiquadFilter();
-  const reverbWet = ctx.createGain();
-  const reverbSum = ctx.createGain();
-  reverbDamping.type = 'lowpass';
-  reverbDamping.Q.value = 0.45;
-
-  const compInput = ctx.createGain();
-  const compDry = ctx.createGain();
-  const compressor = ctx.createDynamicsCompressor();
-  const compMakeup = ctx.createGain();
-  const compWet = ctx.createGain();
-  const compSum = ctx.createGain();
-
-  const disperser = new AudioWorkletNode(ctx, 'disperser-processor', { channelCount: 2, channelCountMode: 'explicit', outputChannelCount: [2] });
   const output = ctx.createGain();
   const outputAnalyser = makeAnalyser(ctx, 4096);
   const outputSplitter = ctx.createChannelSplitter(2);
@@ -182,7 +104,6 @@ function createGraph() {
   const outputR = makeAnalyser(ctx, 512);
   const outputMeterSink = ctx.createGain();
   outputMeterSink.gain.value = 0;
-
   sourceNode.connect(inputAnalyser);
   sourceNode.connect(inputSplitter);
   inputSplitter.connect(inputL, 0);
@@ -190,44 +111,6 @@ function createGraph() {
   inputL.connect(inputMeterSink);
   inputR.connect(inputMeterSink);
   inputMeterSink.connect(ctx.destination);
-
-  eqLow.connect(eqMid);
-  eqMid.connect(eqHigh);
-  eqHigh.connect(eqAnalyser);
-
-  distInput.connect(distDry);
-  distDry.connect(distSum);
-  distInput.connect(distPre);
-  distPre.connect(distShape);
-  distShape.connect(distTone);
-  distTone.connect(distWet);
-  distWet.connect(distSum);
-  distSum.connect(distOutput);
-
-  clipPreAnalyser.connect(clipDry);
-  clipDry.connect(clipSum);
-  clipPreAnalyser.connect(clipDrive);
-  clipDrive.connect(clipShape);
-  clipShape.connect(clipPost);
-  clipPost.connect(clipWet);
-  clipWet.connect(clipSum);
-  clipSum.connect(clipPostAnalyser);
-
-  reverbInput.connect(reverbDry);
-  reverbDry.connect(reverbSum);
-  reverbInput.connect(reverbPreDelay);
-  reverbPreDelay.connect(convolver);
-  convolver.connect(reverbDamping);
-  reverbDamping.connect(reverbWet);
-  reverbWet.connect(reverbSum);
-
-  compInput.connect(compDry);
-  compDry.connect(compSum);
-  compInput.connect(compressor);
-  compressor.connect(compMakeup);
-  compMakeup.connect(compWet);
-  compWet.connect(compSum);
-
   output.connect(outputAnalyser);
   outputAnalyser.connect(ctx.destination);
   outputAnalyser.connect(outputSplitter);
@@ -236,90 +119,186 @@ function createGraph() {
   outputL.connect(outputMeterSink);
   outputR.connect(outputMeterSink);
   outputMeterSink.connect(ctx.destination);
-
-  const stages = {
-    eq: { input: eqLow, output: eqAnalyser },
-    distortion: { input: distInput, output: distOutput },
-    clipper: { input: clipPreAnalyser, output: clipPostAnalyser },
-    reverb: { input: reverbInput, output: reverbSum },
-    compressor: { input: compInput, output: compSum },
-    disperser: { input: disperser, output: disperser }
-  };
-  return { inputAnalyser, inputL, inputR, eqLow, eqMid, eqHigh, eqAnalyser, distDry, distPre, distShape, distTone, distWet, distSum, distOutput, clipPreAnalyser, clipDry, clipDrive, clipShape, clipPost, clipWet, clipSum, clipPostAnalyser, reverbDry, reverbPreDelay, convolver, reverbDamping, reverbWet, reverbSum, compDry, compressor, compMakeup, compWet, compSum, disperser, stages, output, outputAnalyser, outputL, outputR };
+  return { inputAnalyser, inputL, inputR, output, outputAnalyser, outputL, outputR, stages: new Map() };
 }
 
-function connectChain(order) {
+function createStage(effect) {
+  const ctx = audioContext;
+  const type = effect.type;
+  if (type === 'eq') {
+    const eqLow = ctx.createBiquadFilter();
+    const eqMid = ctx.createBiquadFilter();
+    const eqHigh = ctx.createBiquadFilter();
+    const eqAnalyser = makeAnalyser(ctx, 4096);
+    eqLow.type = 'lowshelf';
+    eqMid.type = 'peaking';
+    eqHigh.type = 'highshelf';
+    eqLow.connect(eqMid);
+    eqMid.connect(eqHigh);
+    eqHigh.connect(eqAnalyser);
+    return { type, input: eqLow, output: eqAnalyser, eqLow, eqMid, eqHigh, eqAnalyser };
+  }
+  if (type === 'distortion') {
+    const input = ctx.createGain();
+    const dry = ctx.createGain();
+    const pre = ctx.createGain();
+    const shape = ctx.createWaveShaper();
+    const tone = ctx.createBiquadFilter();
+    const wet = ctx.createGain();
+    const sum = ctx.createGain();
+    const output = ctx.createGain();
+    shape.curve = makeDistortionCurve();
+    shape.oversample = '4x';
+    tone.type = 'lowpass';
+    tone.Q.value = .55;
+    input.connect(dry).connect(sum);
+    input.connect(pre).connect(shape).connect(tone).connect(wet).connect(sum);
+    sum.connect(output);
+    return { type, input, output, dry, pre, shape, tone, wet };
+  }
+  if (type === 'clipper') {
+    const input = makeAnalyser(ctx, 1024);
+    const dry = ctx.createGain();
+    const drive = ctx.createGain();
+    const shape = ctx.createWaveShaper();
+    const post = ctx.createGain();
+    const wet = ctx.createGain();
+    const sum = ctx.createGain();
+    const output = makeAnalyser(ctx, 1024);
+    shape.curve = makeClipCurve(EFFECT_DEFAULTS.clipper.softness);
+    shape.oversample = '4x';
+    input.connect(dry).connect(sum);
+    input.connect(drive).connect(shape).connect(post).connect(wet).connect(sum);
+    sum.connect(output);
+    return { type, input, output, dry, drive, shape, post, wet };
+  }
+  if (type === 'reverb') {
+    const input = ctx.createGain();
+    const dry = ctx.createGain();
+    const preDelay = ctx.createDelay(.2);
+    const convolver = ctx.createConvolver();
+    const damping = ctx.createBiquadFilter();
+    const wet = ctx.createGain();
+    const output = ctx.createGain();
+    damping.type = 'lowpass';
+    damping.Q.value = .45;
+    input.connect(dry).connect(output);
+    input.connect(preDelay).connect(convolver).connect(damping).connect(wet).connect(output);
+    return { type, input, output, dry, preDelay, convolver, damping, wet, impulseKey: '', impulseTimer: null };
+  }
+  if (type === 'compressor') {
+    const input = ctx.createGain();
+    const dry = ctx.createGain();
+    const compressor = ctx.createDynamicsCompressor();
+    const makeup = ctx.createGain();
+    const wet = ctx.createGain();
+    const output = ctx.createGain();
+    input.connect(dry).connect(output);
+    input.connect(compressor).connect(makeup).connect(wet).connect(output);
+    return { type, input, output, dry, compressor, makeup, wet };
+  }
+  const node = new AudioWorkletNode(ctx, 'disperser-processor', { channelCount: 2, channelCountMode: 'explicit', outputChannelCount: [2], processorOptions: { enabled: effect.enabled, amount: effect.amount, frequency: effect.frequency, pinch: effect.pinch } });
+  return { type, input: node, output: node, node };
+}
+
+function rebuildChain() {
   nodes.inputAnalyser.disconnect();
-  for (const stage of Object.values(nodes.stages)) stage.output.disconnect();
+  for (const stage of nodes.stages.values()) stage.output.disconnect();
   let previous = nodes.inputAnalyser;
-  for (const effect of order) {
-    previous.connect(nodes.stages[effect].input);
-    previous = nodes.stages[effect].output;
+  for (const effect of state.chain) {
+    const stage = nodes.stages.get(effect.id);
+    previous.connect(stage.input);
+    previous = stage.output;
   }
   previous.connect(nodes.output);
 }
 
-function scheduleImpulseRebuild(force = false) {
-  const key = `${state.reverb.size.toFixed(3)}:${state.reverb.decay.toFixed(3)}`;
-  if (!force && key === lastImpulseKey) return;
-  lastImpulseKey = key;
-  clearTimeout(reverbTimer);
-  reverbTimer = setTimeout(() => {
-    if (!nodes || !audioContext) return;
-    nodes.convolver.buffer = buildImpulse(state.reverb.size, state.reverb.decay);
-  }, force ? 0 : 90);
+function applyEffect(effect, stage, immediate = false) {
+  const t = immediate ? .001 : .018;
+  if (effect.type === 'eq') {
+    setTarget(stage.eqLow.frequency, effect.lowFreq, t);
+    setTarget(stage.eqLow.gain, effect.enabled ? effect.lowGain : 0, t);
+    setTarget(stage.eqMid.frequency, effect.midFreq, t);
+    setTarget(stage.eqMid.Q, effect.midQ, t);
+    setTarget(stage.eqMid.gain, effect.enabled ? effect.midGain : 0, t);
+    setTarget(stage.eqHigh.frequency, effect.highFreq, t);
+    setTarget(stage.eqHigh.gain, effect.enabled ? effect.highGain : 0, t);
+  } else if (effect.type === 'distortion') {
+    const [dry, wet] = effect.enabled ? equalPower(effect.mix) : [1, 0];
+    setTarget(stage.pre.gain, dbToGain(effect.drive), t);
+    setTarget(stage.tone.frequency, effect.tone, t);
+    setTarget(stage.dry.gain, dry, t);
+    setTarget(stage.wet.gain, wet, t);
+    setTarget(stage.output.gain, effect.enabled ? dbToGain(effect.output) : 1, t);
+  } else if (effect.type === 'clipper') {
+    if (stage.softness !== effect.softness) {
+      stage.shape.curve = makeClipCurve(effect.softness);
+      stage.softness = effect.softness;
+    }
+    setTarget(stage.drive.gain, dbToGain(effect.drive), t);
+    setTarget(stage.post.gain, dbToGain(effect.ceiling), t);
+    setTarget(stage.dry.gain, effect.enabled ? 0 : 1, t);
+    setTarget(stage.wet.gain, effect.enabled ? 1 : 0, t);
+  } else if (effect.type === 'reverb') {
+    const [dry, wet] = effect.enabled ? equalPower(effect.mix) : [1, 0];
+    setTarget(stage.dry.gain, dry, t);
+    setTarget(stage.wet.gain, wet, t);
+    setTarget(stage.preDelay.delayTime, effect.preDelay, t);
+    setTarget(stage.damping.frequency, effect.damping, t);
+    const key = effect.size.toFixed(3) + ':' + effect.decay.toFixed(3);
+    if (key !== stage.impulseKey) {
+      stage.impulseKey = key;
+      clearTimeout(stage.impulseTimer);
+      if (immediate) stage.convolver.buffer = buildImpulse(effect.size, effect.decay);
+      else stage.impulseTimer = setTimeout(() => {
+        if (nodes?.stages.get(effect.id) === stage) stage.convolver.buffer = buildImpulse(effect.size, effect.decay);
+      }, 90);
+    }
+  } else if (effect.type === 'compressor') {
+    setTarget(stage.compressor.threshold, effect.threshold, t);
+    setTarget(stage.compressor.ratio, effect.ratio, t);
+    setTarget(stage.compressor.attack, effect.attack, t);
+    setTarget(stage.compressor.release, effect.release, t);
+    setTarget(stage.compressor.knee, effect.knee, t);
+    setTarget(stage.makeup.gain, dbToGain(effect.makeup), t);
+    setTarget(stage.dry.gain, effect.enabled ? 0 : 1, t);
+    setTarget(stage.wet.gain, effect.enabled ? 1 : 0, t);
+  } else {
+    stage.node.port.postMessage(effect);
+  }
 }
 
-function applyState(immediate = false) {
+function syncGraph(immediate = false) {
   if (!nodes || !audioContext) return;
-  const t = immediate ? 0.001 : 0.018;
-
-  const eqEnabled = state.eq.enabled;
-  setTarget(nodes.eqLow.frequency, state.eq.lowFreq, t);
-  setTarget(nodes.eqLow.gain, eqEnabled ? state.eq.lowGain : 0, t);
-  setTarget(nodes.eqMid.frequency, state.eq.midFreq, t);
-  setTarget(nodes.eqMid.Q, state.eq.midQ, t);
-  setTarget(nodes.eqMid.gain, eqEnabled ? state.eq.midGain : 0, t);
-  setTarget(nodes.eqHigh.frequency, state.eq.highFreq, t);
-  setTarget(nodes.eqHigh.gain, eqEnabled ? state.eq.highGain : 0, t);
-
-  const distEnabled = state.distortion.enabled;
-  const [distDry, distWet] = distEnabled ? equalPower(state.distortion.mix) : [1, 0];
-  setTarget(nodes.distPre.gain, dbToGain(state.distortion.drive), t);
-  setTarget(nodes.distTone.frequency, state.distortion.tone, t);
-  setTarget(nodes.distDry.gain, distDry, t);
-  setTarget(nodes.distWet.gain, distWet, t);
-  setTarget(nodes.distOutput.gain, distEnabled ? dbToGain(state.distortion.output) : 1, t);
-
-  const clipEnabled = state.clipper.enabled;
-  nodes.clipShape.curve = makeClipCurve(state.clipper.softness);
-  setTarget(nodes.clipDrive.gain, dbToGain(state.clipper.drive), t);
-  setTarget(nodes.clipPost.gain, dbToGain(state.clipper.ceiling), t);
-  setTarget(nodes.clipDry.gain, clipEnabled ? 0 : 1, t);
-  setTarget(nodes.clipWet.gain, clipEnabled ? 1 : 0, t);
-
-  const reverbEnabled = state.reverb.enabled;
-  const [reverbDry, reverbWet] = reverbEnabled ? equalPower(state.reverb.mix) : [1, 0];
-  setTarget(nodes.reverbDry.gain, reverbDry, t);
-  setTarget(nodes.reverbWet.gain, reverbWet, t);
-  setTarget(nodes.reverbPreDelay.delayTime, state.reverb.preDelay, t);
-  setTarget(nodes.reverbDamping.frequency, state.reverb.damping, t);
-  scheduleImpulseRebuild(immediate);
-
-  const compEnabled = state.compressor.enabled;
-  setTarget(nodes.compressor.threshold, state.compressor.threshold, t);
-  setTarget(nodes.compressor.ratio, state.compressor.ratio, t);
-  setTarget(nodes.compressor.attack, state.compressor.attack, t);
-  setTarget(nodes.compressor.release, state.compressor.release, t);
-  setTarget(nodes.compressor.knee, state.compressor.knee, t);
-  setTarget(nodes.compMakeup.gain, dbToGain(state.compressor.makeup), t);
-  setTarget(nodes.compDry.gain, compEnabled ? 0 : 1, t);
-  setTarget(nodes.compWet.gain, compEnabled ? 1 : 0, t);
-  nodes.disperser.port.postMessage(state.disperser);
-  const order = state.order.join(',');
-  if (order !== chainOrder) { connectChain(state.order); chainOrder = order; }
+  const ids = new Set(state.chain.map(effect => effect.id));
+  let changed = false;
+  for (const [id, stage] of nodes.stages) {
+    if (ids.has(id)) continue;
+    stage.output.disconnect();
+    if (stage.impulseTimer) clearTimeout(stage.impulseTimer);
+    nodes.stages.delete(id);
+    changed = true;
+  }
+  for (const effect of state.chain) {
+    let stage = nodes.stages.get(effect.id);
+    const isNew = !stage;
+    if (isNew) {
+      stage = createStage(effect);
+      nodes.stages.set(effect.id, stage);
+      changed = true;
+    }
+    const settingsKey = JSON.stringify(effect);
+    if (immediate || isNew || stage.settingsKey !== settingsKey) {
+      applyEffect(effect, stage, immediate || isNew);
+      stage.settingsKey = settingsKey;
+    }
+  }
+  const signature = state.chain.map(effect => effect.id).join('|');
+  if (changed || signature !== chainSignature) {
+    rebuildChain();
+    chainSignature = signature;
+  }
 }
-
 function sampleSpectrum(analyser, points = 96) {
   const raw = new Float32Array(analyser.frequencyBinCount);
   analyser.getFloatFrequencyData(raw);
@@ -362,7 +341,7 @@ function meterDb(analyser) {
   return { peak: Math.max(-90, Math.min(6, peakDb)), rms: Math.max(-90, Math.min(6, rmsDb)) };
 }
 
-function sampleEqResponse(points = 96) {
+function sampleEqResponse(stage, points = 96) {
   const freqs = new Float32Array(points);
   const lowMag = new Float32Array(points);
   const midMag = new Float32Array(points);
@@ -371,9 +350,9 @@ function sampleEqResponse(points = 96) {
   const minLog = Math.log10(20);
   const maxLog = Math.log10(Math.min(20000, audioContext.sampleRate * 0.5));
   for (let i = 0; i < points; i++) freqs[i] = Math.pow(10, minLog + (maxLog - minLog) * i / (points - 1));
-  nodes.eqLow.getFrequencyResponse(freqs, lowMag, phase);
-  nodes.eqMid.getFrequencyResponse(freqs, midMag, phase);
-  nodes.eqHigh.getFrequencyResponse(freqs, highMag, phase);
+  stage.eqLow.getFrequencyResponse(freqs, lowMag, phase);
+  stage.eqMid.getFrequencyResponse(freqs, midMag, phase);
+  stage.eqHigh.getFrequencyResponse(freqs, highMag, phase);
   const result = new Array(points);
   for (let i = 0; i < points; i++) result[i] = 20 * Math.log10(Math.max(0.000001, lowMag[i] * midMag[i] * highMag[i]));
   return result;
@@ -381,53 +360,45 @@ function sampleEqResponse(points = 96) {
 
 function visualizerData() {
   if (!nodes || !audioContext) return { ok: true, running: false };
+  const devices = {};
+  for (const effect of state.chain) {
+    const stage = nodes.stages.get(effect.id);
+    if (effect.type === 'eq') devices[effect.id] = { eqSpectrum: sampleSpectrum(stage.eqAnalyser), eqResponse: sampleEqResponse(stage) };
+    else if (effect.type === 'clipper') devices[effect.id] = { preClipWave: sampleWave(stage.input), postClipWave: sampleWave(stage.output) };
+    else if (effect.type === 'compressor') devices[effect.id] = { reduction: effect.enabled ? stage.compressor.reduction : 0 };
+  }
   return {
-    ok: true,
-    running: true,
-    sampleRate: audioContext.sampleRate,
+    ok: true, running: true, sampleRate: audioContext.sampleRate, devices,
     inputSpectrum: sampleSpectrum(nodes.inputAnalyser),
     outputSpectrum: sampleSpectrum(nodes.outputAnalyser),
-    eqSpectrum: sampleSpectrum(nodes.eqAnalyser),
-    eqResponse: sampleEqResponse(),
-    preClipWave: sampleWave(nodes.clipPreAnalyser),
-    postClipWave: sampleWave(nodes.clipPostAnalyser),
     inputMeter: { l: meterDb(nodes.inputL), r: meterDb(nodes.inputR) },
-    outputMeter: { l: meterDb(nodes.outputL), r: meterDb(nodes.outputR) },
-    reduction: state.compressor.enabled ? nodes.compressor.reduction : 0
+    outputMeter: { l: meterDb(nodes.outputL), r: meterDb(nodes.outputR) }
   };
 }
 
 async function stopAudio() {
-  clearTimeout(reverbTimer);
-  reverbTimer = null;
-  lastImpulseKey = '';
-  chainOrder = '';
+  if (nodes) for (const stage of nodes.stages.values()) clearTimeout(stage.impulseTimer);
   if (mediaStream) for (const track of mediaStream.getTracks()) track.stop();
-  if (sourceNode) {
-    try { sourceNode.disconnect(); } catch (_) {}
-  }
-  if (audioContext) {
-    try { await audioContext.close(); } catch (_) {}
-  }
+  if (sourceNode) sourceNode.disconnect();
+  if (audioContext) await audioContext.close();
   audioContext = null;
   mediaStream = null;
   sourceNode = null;
   nodes = null;
+  chainSignature = '';
   currentTabId = null;
 }
 
 async function startAudio(streamId, tabId, nextState) {
   await stopAudio();
-  state = mergeState(nextState);
+  state = normalizeRack(nextState);
   mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: streamId } }, video: false });
   audioContext = new AudioContext({ latencyHint: 'interactive' });
   await audioContext.audioWorklet.addModule(chrome.runtime.getURL('disperser-processor.js'));
   sourceNode = audioContext.createMediaStreamSource(mediaStream);
   currentTabId = tabId;
   nodes = createGraph();
-  nodes.convolver.buffer = buildImpulse(state.reverb.size, state.reverb.decay);
-  lastImpulseKey = state.reverb.size.toFixed(3) + ':' + state.reverb.decay.toFixed(3);
-  applyState(true);
+  syncGraph(true);
   const track = mediaStream.getAudioTracks()[0];
   if (track) track.addEventListener('ended', () => stopAudio());
   if (audioContext.state === 'suspended') await audioContext.resume();
@@ -447,8 +418,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message.type === 'update-state') {
-    state = mergeState(message.state);
-    applyState();
+    state = normalizeRack(message.state);
+    syncGraph();
     sendResponse({ ok: true });
     return false;
   }

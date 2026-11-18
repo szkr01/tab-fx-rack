@@ -6,13 +6,13 @@ YouTube / SoundCloud の再生音声に、ブラウザ内でリアルタイム�
 
 ## 主な機能
 
-- 5種類のエフェクトを個別にON/OFFし、ノブでパラメータを調整
+- 6種類のエフェクトを個別にON/OFFし、ノブでパラメータを調整
 - 入出力のステレオレベルメーター、リアルタイム周波数スペクトラム（IN / OUT切替、HOLD）
 - EQの周波数特性、歪みの伝達特性、クリッパーの波形、リバーブの減衰、コンプレッサーの圧縮カーブ・ゲインリダクションを表示
 - 設定をブラウザ内の `chrome.storage.local` に保存
 - 処理対象のタブを切り替え可能（同時に処理するのは1タブ）
 
-音声の処理順：**EQ → Distortion → Clipper → Reverb → Compressor**
+初期の音声処理順：**EQ → Distortion → Clipper → Reverb → Compressor → Disperser**。並べ替えた順序を保存し、音声経路にも反映します。
 
 ## 動作環境
 
@@ -31,10 +31,10 @@ YouTube / SoundCloud の再生音声に、ブラウザ内でリアルタイム�
 
 1. YouTubeまたはSoundCloudのタブを開き、音声を再生します。
 2. ツールバーから **Tab FX Rack** を開いて **START** を押します。
-3. 各エフェクトの小さな丸いスイッチで有効・無効を切り替え、ノブを操作します。
+3. 各エフェクトの小さな丸いスイッチで有効・無効を切り替え、ノブを操作します。ラックは横スクロールできます。
 4. 終了時は **STOP** を押します。別の対応タブへ対象を移すときは **MOVE** を押します。
 
-ノブは上下ドラッグで調整できます。Shiftキーを押しながらドラッグすると微調整、ホイールと矢印キーでも調整でき、ダブルクリックで初期値に戻ります。
+ノブは上下ドラッグで調整できます。Shiftキーを押しながらドラッグすると微調整、ホイールと矢印キーでも調整でき、ダブルクリックで初期値に戻ります。**エフェクト名のドラッグ**、またはヘッダーの左右ボタンで音声処理順を入れ替えられます。
 
 ## エフェクトと調整範囲
 
@@ -45,6 +45,7 @@ YouTube / SoundCloud の再生音声に、ブラウザ内でリアルタイム�
 | **Clipper** | Drive 0–24 dB、Softness 0–100%、Ceiling −12～0 dB |
 | **Reverb** | Size 0–100%、Decay 0.2–8秒、Pre-delay 0–120 ms、Damping 1–20 kHz、Mix 0–100% |
 | **Compressor** | Threshold −60～0 dB、Ratio 1:1～20:1、Attack 0.1～100 ms、Release 20～1000 ms、Knee 0～40 dB、Makeup −12～+12 dB |
+| **Disperser** | Amount 0–32段、Frequency 20 Hz–20 kHz、Pinch 0–100%（内部Q 0.5–16） |
 
 広い範囲の周波数・時間ノブは対数スケールで動作します。
 
@@ -54,7 +55,8 @@ YouTube / SoundCloud の再生音声に、ブラウザ内でリアルタイム�
 | --- | --- |
 | `manifest.json` | Chrome拡張の設定 |
 | `background.js` | タブのキャプチャ開始・停止とメッセージ処理 |
-| `offscreen.html` / `offscreen.js` | Web Audioによる音声処理と分析 |
+| `offscreen.html` / `offscreen.js` | Web Audioによる音声処理と分析、エフェクトの再接続 |
+| `disperser-processor.js` | AudioWorkletによるDisperserのSVFカスケード |
 | `popup.html` / `popup.css` / `popup.js` | 操作画面とグラフ描画 |
 | `icons/` | 拡張機能アイコン |
 

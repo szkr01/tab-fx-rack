@@ -145,17 +145,20 @@ function persistState() {
   saveTimer = setTimeout(() => chrome.runtime.sendMessage({ type: 'update-state', state }).catch(() => {}), 20);
 }
 
-function updateKnobFromNormalizedDelta(knob, deltaNorm) {
+function updateKnobFromNormalizedDelta(knob, deltaNorm, currentNorm = null) {
   const min = Number(knob.dataset.min);
   const max = Number(knob.dataset.max);
   const step = Number(knob.dataset.step);
   const current = getPath(knob.dataset.param);
-  const norm = clamp(valueToNorm(current, min, max, knob.dataset.scale) + deltaNorm, 0, 1);
+  const norm = clamp((currentNorm ?? valueToNorm(current, min, max, knob.dataset.scale)) + deltaNorm, 0, 1);
   const next = roundStep(clamp(normToValue(norm, min, max, knob.dataset.scale), min, max), step);
-  setPath(knob.dataset.param, next);
-  renderKnob(knob);
-  drawDeviceVisuals();
-  persistState();
+  if (next !== current) {
+    setPath(knob.dataset.param, next);
+    renderKnob(knob);
+    drawDeviceVisuals();
+    persistState();
+  }
+  return norm;
 }
 
 function bindKnobs() {
@@ -163,18 +166,19 @@ function bindKnobs() {
     knob.addEventListener('pointerdown', event => {
       event.preventDefault();
       knob.setPointerCapture(event.pointerId);
-      drag = { knob, pointerId: event.pointerId, lastY: event.clientY };
+      drag = { knob, pointerId: event.pointerId, lastY: event.clientY, norm: valueToNorm(getPath(knob.dataset.param), Number(knob.dataset.min), Number(knob.dataset.max), knob.dataset.scale) };
     });
     knob.addEventListener('pointermove', event => {
       if (!drag || drag.knob !== knob || drag.pointerId !== event.pointerId) return;
       const deltaY = drag.lastY - event.clientY;
       drag.lastY = event.clientY;
-      updateKnobFromNormalizedDelta(knob, deltaY * (event.shiftKey ? 0.0011 : 0.0042));
+      drag.norm = updateKnobFromNormalizedDelta(knob, deltaY * (event.shiftKey ? 0.0011 : 0.0042), drag.norm);
     });
     knob.addEventListener('pointerup', event => { if (drag?.knob === knob && drag.pointerId === event.pointerId) drag = null; });
     knob.addEventListener('wheel', event => {
       event.preventDefault();
-      updateKnobFromNormalizedDelta(knob, event.deltaY < 0 ? 0.008 : -0.008);
+      const stepNorm = knob.dataset.format === 'stages' ? Number(knob.dataset.step) / (Number(knob.dataset.max) - Number(knob.dataset.min)) : 0.008;
+      updateKnobFromNormalizedDelta(knob, event.deltaY < 0 ? stepNorm : -stepNorm);
     }, { passive: false });
     knob.addEventListener('dblclick', event => {
       event.preventDefault();
@@ -186,7 +190,8 @@ function bindKnobs() {
     knob.addEventListener('keydown', event => {
       if (!['ArrowUp','ArrowRight','ArrowDown','ArrowLeft'].includes(event.key)) return;
       event.preventDefault();
-      updateKnobFromNormalizedDelta(knob, (event.key === 'ArrowUp' || event.key === 'ArrowRight') ? 0.005 : -0.005);
+      const stepNorm = knob.dataset.format === 'stages' ? Number(knob.dataset.step) / (Number(knob.dataset.max) - Number(knob.dataset.min)) : 0.005;
+      updateKnobFromNormalizedDelta(knob, (event.key === 'ArrowUp' || event.key === 'ArrowRight') ? stepNorm : -stepNorm);
     });
   });
 }

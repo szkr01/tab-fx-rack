@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## [1.2.1] - 2026-11-19
+
+- DisperserのAMOUNTノブで微小なドラッグ移動量が整数丸めによって失われる問題を修正。
+- AMOUNTのホイール・矢印キー操作を1段単位に修正。
+
 ## [1.2.0] - 2026-11-19
 
 - DisperserをAudioWorkletで追加（Amount、Frequency、Pinchの調整と群遅延表示）。

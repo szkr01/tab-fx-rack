@@ -1,4 +1,4 @@
-const OFFSCREEN_URL = 'offscreen.html';
+const OFFSCREEN_URL = 'src/audio/offscreen.html';
 let creatingOffscreen = null;
 
 async function hasOffscreenDocument() {

@@ -1,5 +1,5 @@
-// Real-time port of the recovered Disperser SVF cascade (disperser-analysis/reference.py).
-class DisperserProcessor extends AudioWorkletProcessor {
+// Cascaded all-pass effect implemented as an AudioWorklet.
+class DoomerProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super();
     const initial = options.processorOptions || {};
@@ -141,4 +141,4 @@ class DisperserProcessor extends AudioWorkletProcessor {
   }
 }
 
-registerProcessor('disperser-processor', DisperserProcessor);
+registerProcessor('doomer-processor', DoomerProcessor);

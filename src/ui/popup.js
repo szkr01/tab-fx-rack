@@ -299,7 +299,7 @@ function drawDevice(card) {
   else if (effect.type === 'clipper') drawClipper(canvas, effect, data);
   else if (effect.type === 'reverb') drawReverb(canvas, effect);
   else if (effect.type === 'compressor') drawComp(canvas, effect, data, card.querySelector('.gr-meter i'), card.querySelector('.gr-meter b'));
-  else drawDisperser(canvas, effect);
+  else drawDoomer(canvas, effect);
 }
 function drawDeviceVisuals() { for (const card of rack.children) drawDevice(card); }
 function drawAll() { drawSpectrum(); drawMeter(inputMeter, viz?.inputMeter); drawMeter(outputMeter, viz?.outputMeter); drawDeviceVisuals(); }
@@ -556,7 +556,7 @@ function drawComp(canvas, params, reading, grFill, grValue) {
   const reduction = Math.min(0, reading?.reduction ?? 0); const amount = clamp(-reduction / 24, 0, 1); grFill.style.height = `${amount * 63}px`; grFill.style.top = `${14}px`; grValue.textContent = `${reduction.toFixed(1)}`;
 }
 
-function drawDisperser(canvas, params) {
+function drawDoomer(canvas, params) {
   const { ctx, w, h } = canvasSize(canvas); clearCanvas(ctx, w, h); drawGrid(ctx, w, h, 4, 4);
   const fs = viz?.sampleRate || 48000;
   const f0 = Math.min(params.frequency, fs * .49);

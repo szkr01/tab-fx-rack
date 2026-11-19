@@ -197,7 +197,7 @@ function createStage(effect) {
     input.connect(compressor).connect(makeup).connect(wet).connect(output);
     return { type, input, output, dry, compressor, makeup, wet };
   }
-  const node = new AudioWorkletNode(ctx, 'disperser-processor', { channelCount: 2, channelCountMode: 'explicit', outputChannelCount: [2], processorOptions: { enabled: effect.enabled, amount: effect.amount, frequency: effect.frequency, pinch: effect.pinch } });
+  const node = new AudioWorkletNode(ctx, 'doomer-processor', { channelCount: 2, channelCountMode: 'explicit', outputChannelCount: [2], processorOptions: { enabled: effect.enabled, amount: effect.amount, frequency: effect.frequency, pinch: effect.pinch } });
   return { type, input: node, output: node, node };
 }
 
@@ -394,7 +394,7 @@ async function startAudio(streamId, tabId, nextState) {
   state = normalizeRack(nextState);
   mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: streamId } }, video: false });
   audioContext = new AudioContext({ latencyHint: 'interactive' });
-  await audioContext.audioWorklet.addModule(chrome.runtime.getURL('disperser-processor.js'));
+  await audioContext.audioWorklet.addModule(chrome.runtime.getURL('src/audio/doomer-processor.js'));
   sourceNode = audioContext.createMediaStreamSource(mediaStream);
   currentTabId = tabId;
   nodes = createGraph();

@@ -1,17 +1,17 @@
 {
   "manifest_version": 3,
   "name": "Tab FX Rack",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "description": "A real-time browser audio effect rack for YouTube and SoundCloud.",
   "minimum_chrome_version": "116",
   "permissions": ["activeTab", "tabCapture", "offscreen", "storage"],
   "background": {
-    "service_worker": "background.js",
+    "service_worker": "src/background.js",
     "type": "module"
   },
   "action": {
     "default_title": "Tab FX Rack",
-    "default_popup": "popup.html",
+    "default_popup": "src/ui/popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
